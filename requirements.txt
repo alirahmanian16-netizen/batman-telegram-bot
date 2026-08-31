@@ -1,0 +1,8 @@
+python-telegram-bot[job-queue]>=20.0,<23.0
+httpx>=0.24,<1.0
+python-chess>=1.999,<2.0
+yt-dlp==2026.8.19
+Pillow>=10.0,<11.0
+jdatetime>=4.1,<6.0
+hijri-converter>=2.3,<3.0
+SpeechRecognition>=3.10,<4.0
