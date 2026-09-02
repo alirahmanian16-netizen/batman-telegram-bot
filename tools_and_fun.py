@@ -43,6 +43,7 @@ TOOLS_TEXT = (
     "🔑 پسورد قوی: بنویس «پسورد» یا «رمز عبور» تا یه رمز تصادفی امن بسازم.\n"
     "📐 تبدیل واحد: بنویس «تبدیل <عدد> <واحد۱> به <واحد۲>» (وزن/طول/دما/ارز).\n"
     "🧮 ماشین‌حساب: بنویس «حساب <عبارت>» (مثل «حساب (۱۲+۳)*۲» یا «حساب sqrt(81)»).\n"
+    "💵 قیمت دلار: فقط بنویس «دلار» (یا دکمه‌ی زیر) تا قیمت لحظه‌ای دلار آزاد رو بگیری.\n"
     "🎬 پست‌ساز گاتهام: ویرایش/فشرده‌سازی/لوگو/کپشن برای ویدیو، عکس و گیف — از دکمه‌ی زیر."
 )
 
@@ -257,6 +258,7 @@ def tools_menu_keyboard():
         [InlineKeyboardButton("📐 تبدیل واحد", callback_data="tool:howto:convert"),
          InlineKeyboardButton("🧮 ماشین‌حساب", callback_data="tool:howto:calc")],
         [InlineKeyboardButton("🎬 پست‌ساز گاتهام", callback_data="postsaz:open")],
+        [InlineKeyboardButton("💵 قیمت دلار", callback_data="gdollar:show")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="panel:main")],
     ])
 

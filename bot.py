@@ -76,6 +76,7 @@ from bug_reporter import (
 )
 from security_tools import register_security, build_security_text_and_kb
 from tools_and_fun import register_tools_and_fun, TOOLS_TEXT, FUN_TEXT, tools_menu_keyboard, fun_menu_keyboard
+from dollar_price import register_dollar_price
 from compress_tools import register_compress
 from voice_to_text import register_voice_to_text
 from post_saz import register_post_saz, postsaz_intercept
@@ -5105,6 +5106,9 @@ def main():
 
     # --- ابزارها (ترجمه/کیوآر/پسورد) و سرگرمی (جوک/فکت) ---
     register_tools_and_fun(app)
+
+    # --- 🦇💵 قیمت لحظه‌ای دلار آزاد (کلمه‌ی «دلار» + دکمه‌ی «🛠 ابزارها») ---
+    register_dollar_price(app)
 
     # --- تبدیل و فشرده‌سازی فایل (ریپلای + «فشرده») ---
     register_compress(app)
