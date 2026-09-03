@@ -17,10 +17,12 @@ Midnight Gotham Announcement
 
 import time as time_module
 import logging
+import random
 from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 
 from gotham_content import pick_event_name, pick_dialogue_line
+from custom_emojis import ce, CUSTOM_EMOJIS, esc
 
 try:
     import jdatetime
@@ -176,6 +178,67 @@ def _special_event_for_date(now: datetime):
     return None
 
 
+# --- 🦇💵 قیمت دلار برای پیام‌های نیمه‌شب/صبح ---
+# قیمت ساعت ۰۰:۰۰ رو تو دیتابیس خود ربات (جدول meta، chat_id=0 → سطل
+# سراسری/غیرگروهی) ذخیره می‌کنیم تا صبح بشه با قیمت ۰۸:۰۰ مقایسه‌ش کرد.
+# اگه بین این دو، ربات ری‌استارت بشه هم مشکلی نیست: فقط مقایسه انجام
+# نمی‌شه و پیام صبح بدون خط تغییر (خنثی) نمایش داده می‌شه.
+_DOLLAR_META_CHAT_ID = 0
+_DOLLAR_META_KEY = "midnight_dollar_price"
+
+
+async def _fetch_dollar_price_safe():
+    """برمی‌گردونه: price_toman یا None (اگه گرفتنش شکست خورد)."""
+    try:
+        from dollar_price import get_dollar_data
+        data = await get_dollar_data()
+        return data["price_toman"]
+    except Exception as e:
+        logging.getLogger(__name__).info(f"گرفتن قیمت دلار برای پیام نیمه‌شب/صبح شکست خورد: {e}")
+        return None
+
+
+def _save_midnight_dollar_price(price):
+    try:
+        import bot as _bot
+        _bot._list_add(_DOLLAR_META_CHAT_ID, "meta", _DOLLAR_META_KEY, str(price))
+    except Exception as e:
+        logging.getLogger(__name__).info(f"ذخیره‌ی قیمت دلار نیمه‌شب شکست خورد: {e}")
+
+
+def _load_midnight_dollar_price():
+    try:
+        import bot as _bot
+        val = _bot._list_get_one(_DOLLAR_META_CHAT_ID, "meta", _DOLLAR_META_KEY)
+        return float(val) if val else None
+    except Exception:
+        return None
+
+
+def _dollar_line_night(price) -> str:
+    dollar_emoji = ce(CUSTOM_EMOJIS["dollar"][0], "💵")
+    return f"{dollar_emoji} دلار آزاد: {price:,.0f} تومان"
+
+
+def _dollar_block_morning(price, midnight_price):
+    """برمی‌گردونه: (خط متن دلار, جهت "up"/"down"/"flat")."""
+    dollar_emoji = ce(CUSTOM_EMOJIS["dollar"][0], "💵")
+    line = f"{dollar_emoji} دلار آزاد: {price:,.0f} تومان"
+    if not midnight_price:
+        return line, "flat"
+    diff = price - midnight_price
+    pct = (diff / midnight_price * 100) if midnight_price else 0.0
+    if abs(pct) < 0.05:
+        return line, "flat"
+    if diff > 0:
+        up = ce(CUSTOM_EMOJIS["dollar_up"][0], "📈")
+        line += f"\n{up} +{diff:,.0f} تومان (+{pct:.2f}٪) نسبت به گزارش نیمه‌شب"
+        return line, "up"
+    down = ce(CUSTOM_EMOJIS["dollar_down"][0], "📉")
+    line += f"\n{down} {diff:,.0f} تومان ({pct:.2f}٪) نسبت به گزارش نیمه‌شب"
+    return line, "down"
+
+
 async def midnight_announcement(context):
     now = datetime.now(TEHRAN_TZ)
     fa_str = _format_persian_date(now)
@@ -187,12 +250,20 @@ async def midnight_announcement(context):
         event = pick_event_name()
         line = pick_dialogue_line()
 
+    dollar_price = await _fetch_dollar_price_safe()
+    if dollar_price is not None:
+        _save_midnight_dollar_price(dollar_price)
+        dollar_block = "\n\n" + _dollar_line_night(dollar_price)
+    else:
+        dollar_block = ""
+
     text = (
         "🌑 نیمه‌شب فرا رسید\n"
-        f"📅 {fa_str}\n"
-        f"📅 {en_str}\n\n"
-        f"{event}\n"
-        f"«{line}»"
+        f"📅 {esc(fa_str)}\n"
+        f"📅 {esc(en_str)}\n\n"
+        f"{esc(event)}\n"
+        f"«{esc(line)}»"
+        f"{dollar_block}"
     )
 
     try:
@@ -202,7 +273,7 @@ async def midnight_announcement(context):
 
     for chat_id in chat_ids:
         try:
-            await context.bot.send_message(chat_id=chat_id, text=text)
+            await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
         except Exception:
             pass  # اگه ربات از یه گروه حذف شده باشه یا خطای دیگه‌ای بخوره، بی‌خیال اون یکی شو
 
@@ -239,17 +310,48 @@ async def _announce_knight_of_month(context, chat_ids):
             pass
 
 
+_MORNING_LINES_BITTER = [
+    "صبح گاتهام تلخه امروز... دلار هم بی‌خیال نشد.",
+    "بیدار شو شهروند — بازار هم مثل گاتهام، امشب آروم نبود.",
+]
+_MORNING_LINES_POSITIVE = [
+    "صبح بخیر گاتهام! امروز حداقل دلار طرف ماست.",
+    "یه خبر خوب برای شروع روز — دلار عقب نشست.",
+]
+
+
 async def morning_quote(context):
-    """هر روز صبح ساعت ۸، یه دیالوگ کوتاه گاتهامی می‌فرسته - جدا از پیام نیمه‌شب."""
+    """هر روز صبح ساعت ۸، یه دیالوگ کوتاه گاتهامی + گزارش دلار می‌فرسته - جدا از پیام نیمه‌شب.
+
+    اگه قیمت دلار ساعت ۸ نسبت به گزارش ۰۰:۰۰ بیشتر شده باشه، لحن پیام
+    کمی تلخ‌تر/جدی‌تر می‌شه و Custom Emoji صعودی نشون داده می‌شه؛ اگه کمتر
+    شده باشه، پیام مثبت‌تره و Custom Emoji نزولی میاد؛ اگه تقریباً ثابت
+    مونده، پیام خنثیه (دیالوگ معمولی گاتهام)."""
     from gotham_content import gotham_signature_line
     try:
         chat_ids = _get_all_chat_ids()
     except Exception:
         chat_ids = []
-    text = f"☀️ صبح گاتهام\n«{gotham_signature_line()}»"
+
+    dollar_price = await _fetch_dollar_price_safe()
+    dollar_direction = "flat"
+    dollar_block = ""
+    if dollar_price is not None:
+        midnight_price = _load_midnight_dollar_price()
+        dollar_line, dollar_direction = _dollar_block_morning(dollar_price, midnight_price)
+        dollar_block = "\n\n" + dollar_line
+
+    if dollar_direction == "up":
+        mood_line = random.choice(_MORNING_LINES_BITTER)
+    elif dollar_direction == "down":
+        mood_line = random.choice(_MORNING_LINES_POSITIVE)
+    else:
+        mood_line = gotham_signature_line()
+
+    text = f"☀️ صبح گاتهام\n«{esc(mood_line)}»{dollar_block}"
     for chat_id in chat_ids:
         try:
-            await context.bot.send_message(chat_id=chat_id, text=text)
+            await context.bot.send_message(chat_id=chat_id, text=text, parse_mode="HTML")
         except Exception:
             pass
 

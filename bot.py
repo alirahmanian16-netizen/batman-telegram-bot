@@ -4888,11 +4888,26 @@ async def global_error_handler(update, context: ContextTypes.DEFAULT_TYPE):
     اون مهم‌تر، خودِ این تابع (که قراره خطاهای بقیه‌ی ربات رو گزارش کنه)
     هرگز نباید خودش یه Exception جدیدِ گزارش‌نشده بترکونه."""
     err = context.error
-    from telegram.error import Conflict as TgConflict
+    from telegram.error import Conflict as TgConflict, NetworkError as TgNetworkError
     if isinstance(err, TgConflict):
         log.warning("Conflict گذرا حین ری‌دیپلوی — نادیده گرفته شد (خودکار حل می‌شه)")
         return
-    log.exception("خطای پیش‌بینی‌نشده در پردازش یک آپدیت", exc_info=err)
+
+    # 🌐 NetworkError (شامل httpx.ReadError/ConnectError/TimeoutException که از
+    # زیرِ python-telegram-bot بالا میان) یه خطای موقتی اتصاله، نه یه Bug
+    # واقعی تو کد ما. python-telegram-bot خودش به‌صورت داخلی polling رو
+    # دوباره retry می‌کنه (ربات Crash نمی‌کنه)؛ کاری که اینجا لازمه فقط اینه
+    # که با سطح لاگ پایین‌تر (warning، نه exception با traceback کامل) ثبت
+    # بشه و Owner با هر تکرارش اسپم نشه.
+    try:
+        from bug_reporter import is_network_error as _is_network_error
+        is_network = isinstance(err, TgNetworkError) or _is_network_error(err)
+    except Exception:
+        is_network = isinstance(err, TgNetworkError)
+    if is_network:
+        log.warning(f"🌐 NetworkError موقتی — ربات همچنان در حال اجراست، polling خودکار retry می‌کنه: {err}")
+    else:
+        log.exception("خطای پیش‌بینی‌نشده در پردازش یک آپدیت", exc_info=err)
 
     # --- استخراج context از Update، هر فیلد جدا و ایمن ---
     chat_id = user_id = update_type = callback_data = None
@@ -4939,13 +4954,23 @@ async def global_error_handler(update, context: ContextTypes.DEFAULT_TYPE):
 
     # --- ثبت و ارسال گزارش — هیچ استثنایی از اینجا نباید بیرون بره ---
     try:
-        from bug_reporter import remember_error, format_error
+        from bug_reporter import remember_error, format_error, should_report_network_error
         item = remember_error(
             "handle_update", err, chat_id=chat_id, user_id=user_id,
             update_type=update_type, callback_data=callback_data,
         )
+
+        # 🌐 throttle: خطای شبکه رو همیشه تو RECENT_ERRORS ثبت می‌کنیم (بالا،
+        # remember_error) ولی فقط هر ۵ دقیقه یه‌بار به Owner پیام می‌فرستیم —
+        # وگرنه یه قطعی چند دقیقه‌ای اینترنت می‌تونه ده‌ها پیام یکسان بفرسته.
+        skipped = 0
+        if item.get("category") == "network":
+            should_send, skipped = should_report_network_error()
+            if not should_send:
+                return
+
         try:
-            report_text = format_error(item)
+            report_text = format_error(item, skipped_count=skipped)
         except Exception as fmt_err:
             # حتی اگه فرمت‌کردن گزارش هم شکست بخوره، حداقل یه پیام خام برو
             log.exception("format_error خودش شکست خورد", exc_info=fmt_err)
@@ -4954,10 +4979,10 @@ async def global_error_handler(update, context: ContextTypes.DEFAULT_TYPE):
                 f"خطا: {type(err).__name__}: {err}"
             )
         try:
-            await context.bot.send_message(chat_id=OWNER_ID, text=report_text, parse_mode="Markdown")
+            await context.bot.send_message(chat_id=OWNER_ID, text=report_text, parse_mode="HTML")
         except Exception:
-            # اگه parse_mode مارک‌داون به‌خاطر کاراکتر خاصی تو traceback خطا
-            # داد، بدون فرمت هم امتحان کن — مهم‌تر از قشنگی، رسیدنِ خبره.
+            # اگه parse_mode به‌خاطر کاراکتر خاصی تو traceback خطا داد، بدون
+            # فرمت هم امتحان کن — مهم‌تر از قشنگی، رسیدنِ خبره.
             try:
                 await context.bot.send_message(chat_id=OWNER_ID, text=report_text)
             except Exception as send_err:
@@ -4991,7 +5016,20 @@ def main():
 
     _init_db()
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    # 🌐 قبلاً هیچ timeout سفارشی‌ای برای HTTPXRequest ست نشده بود (مقادیر
+    # پیش‌فرض کتابخونه استفاده می‌شد)؛ رفع خطای httpx.ReadError/NetworkError
+    # (بخش ۱۱ دستور کار) شامل تنظیم صریح این مقادیره تا هم زیادی کوچیک نباشن
+    # (که باعث Timeout کاذب رو شبکه‌ی نه‌چندان سریع Railway بشه) و هم زیادی
+    # بزرگ نباشن (که یه Connection معلق خیلی طول بکشه تا خودش رو نشون بده).
+    from telegram.request import HTTPXRequest
+    _tg_request = HTTPXRequest(
+        connect_timeout=15.0,
+        read_timeout=25.0,
+        write_timeout=25.0,
+        pool_timeout=15.0,
+    )
+
+    app = ApplicationBuilder().token(BOT_TOKEN).request(_tg_request).build()
 
     # قبلاً هیچ error handler سراسری‌ای ثبت نشده بود، یعنی هر خطای پیش‌بینی‌نشده
     # (تو دیتابیس، پارس مارک‌داون، هرچی) کاملاً بی‌صدا گم می‌شد — نه به کاربر

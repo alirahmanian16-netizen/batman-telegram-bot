@@ -47,6 +47,8 @@ from bs4 import BeautifulSoup
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes, MessageHandler, CallbackQueryHandler, filters
 
+from custom_emojis import ce, CUSTOM_EMOJIS, esc
+
 try:
     import jdatetime
 except ImportError:  # نباید پیش بیاد، jdatetime تو requirements.txt هست
@@ -284,6 +286,18 @@ def _format_jalali_now(dt: datetime) -> str:
     return jnow.strftime("%Y/%m/%d | %H:%M:%S")
 
 
+def dollar_direction_emoji(direction, change_percent=None, fallback_flat="➖") -> str:
+    """تگ Custom Emoji مناسبِ جهت تغییر دلار رو برمی‌گردونه (صعودی/نزولی/خنثی).
+    parse_mode="HTML" لازمه تا نمایش داده بشه."""
+    if change_percent is not None and abs(change_percent) < FLAT_CHANGE_PERCENT:
+        return fallback_flat
+    if direction == "high":
+        return ce(CUSTOM_EMOJIS["dollar_up"][0], "📈")
+    if direction == "low":
+        return ce(CUSTOM_EMOJIS["dollar_down"][0], "📉")
+    return fallback_flat
+
+
 def build_dollar_message(data: dict) -> str:
     price = data["price_toman"]
     change_toman = data["change_toman"]
@@ -293,22 +307,26 @@ def build_dollar_message(data: dict) -> str:
     low = data["low_toman"]
     high = data["high_toman"]
 
+    dollar_emoji = ce(CUSTOM_EMOJIS["dollar"][0], "💵")
+
     change_line = None
     if change_toman is not None and change_percent is not None and direction is not None:
         abs_pct = abs(change_percent)
         if abs_pct < FLAT_CHANGE_PERCENT:
             change_line = "⚪ بدون تغییر\n➖ 0.00٪"
         elif direction == "high":
-            change_line = f"🔴 +{change_toman:,.0f} تومان\n📈 +{change_percent:.2f}٪ نسبت به دیروز"
+            up = ce(CUSTOM_EMOJIS["dollar_up"][0], "📈")
+            change_line = f"🔴 +{change_toman:,.0f} تومان\n{up} +{change_percent:.2f}٪ نسبت به دیروز"
         else:
-            change_line = f"🟢 -{change_toman:,.0f} تومان\n📉 -{change_percent:.2f}٪ نسبت به دیروز"
+            down = ce(CUSTOM_EMOJIS["dollar_down"][0], "📉")
+            change_line = f"🟢 -{change_toman:,.0f} تومان\n{down} -{change_percent:.2f}٪ نسبت به دیروز"
 
     flavor = _gotham_flavor(change_percent, direction)
 
     lines = [
         "🦇 GOTHAM DOLLAR",
         "",
-        "💵 1 دلار آمریکا",
+        f"{dollar_emoji} 1 دلار آمریکا",
         f"💸 {price:,.0f} تومان",
         "",
     ]
@@ -323,16 +341,24 @@ def build_dollar_message(data: dict) -> str:
         lines.append(f"📉 کف امروز: {low:,.0f} تومان")
         lines.append("")
 
-    lines.append(f"🕐 {_format_jalali_now(data['fetched_at'])} (زمان دریافت)")
+    lines.append(f"🕐 {esc(_format_jalali_now(data['fetched_at']))} (زمان دریافت)")
     lines.append("")
     lines.append("🦇 وضعیت گاتهام:")
-    lines.append(flavor)
+    lines.append(esc(flavor))
     lines.append("")
     lines.append("━━━━━━━━━━━━━━")
     lines.append("🇮🇷 بازار آزاد ایران")
     lines.append("📡 منبع: TGJU")
     lines.append("━━━━━━━━━━━━━━")
     return "\n".join(lines)
+
+
+def _dollar_error_message() -> str:
+    warn = ce(CUSTOM_EMOJIS["warning"][0], "⚠️")
+    return (
+        f"{warn} گاتهام فعلاً به بازار دلار دسترسی ندارد.\n\n"
+        "🔄 چند لحظه بعد دوباره امتحان کن."
+    )
 
 
 DOLLAR_ERROR_MESSAGE = (
@@ -367,10 +393,10 @@ def register_dollar_price(app):
             data = await get_dollar_data()
         except Exception as e:
             log.warning(f"[dollar_price] گرفتن قیمت دلار شکست خورد: {e}")
-            await msg.reply_text(DOLLAR_ERROR_MESSAGE)
+            await msg.reply_text(_dollar_error_message(), parse_mode="HTML")
             return
         text = build_dollar_message(data)
-        await msg.reply_text(text, reply_markup=_dollar_refresh_keyboard())
+        await msg.reply_text(text, reply_markup=_dollar_refresh_keyboard(), parse_mode="HTML")
 
     async def dollar_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_dollar_price(update, context)
@@ -386,10 +412,10 @@ def register_dollar_price(app):
             data = await get_dollar_data()
         except Exception as e:
             log.warning(f"[dollar_price] گرفتن قیمت دلار (از منوی ابزارها) شکست خورد: {e}")
-            await query.message.reply_text(DOLLAR_ERROR_MESSAGE)
+            await query.message.reply_text(_dollar_error_message(), parse_mode="HTML")
             return
         text = build_dollar_message(data)
-        await query.message.reply_text(text, reply_markup=_dollar_refresh_keyboard())
+        await query.message.reply_text(text, reply_markup=_dollar_refresh_keyboard(), parse_mode="HTML")
 
     async def dollar_refresh_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -406,7 +432,7 @@ def register_dollar_price(app):
             return
         text = build_dollar_message(data)
         try:
-            await query.edit_message_text(text, reply_markup=_dollar_refresh_keyboard())
+            await query.edit_message_text(text, reply_markup=_dollar_refresh_keyboard(), parse_mode="HTML")
         except Exception as e:
             # پیام «Message is not modified» یا موارد مشابه — بی‌خطر، فقط لاگ می‌کنیم
             log.info(f"[dollar_price] edit_message_text نتونست پیام رو بروز کنه (احتمالاً بدون تغییر): {e}")

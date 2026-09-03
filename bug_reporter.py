@@ -4,11 +4,14 @@ Sends concise diagnostics to OWNER_ID and keeps a small in-memory recent-error l
 Never includes API keys or Authorization headers.
 """
 import os
+import time
 import traceback
 from collections import deque
 from datetime import datetime, timezone
 
 from telegram import Bot
+
+from custom_emojis import ce, CUSTOM_EMOJIS
 
 # پوشه‌ی خودِ پروژه — برای اینکه بین فریم‌های تراسبک «کد خودمون» و «کتابخونه‌های
 # نصب‌شده (site-packages/telegram/...)» فرق بذاریم و محل واقعی وقوع خطا رو تو
@@ -63,6 +66,11 @@ RECENT_ERRORS = deque(maxlen=20)
 # دسته‌بندی با تطبیق کلیدواژه رو خودِ همون داده‌ی واقعی انجام می‌شه — چیزی
 # جعل نمی‌شه، فقط داده‌ی موجود مرتب می‌شه.
 BUG_CATEGORIES = {
+    # 🌐 خطاهای شبکه/اتصال (NetworkError، httpx.ReadError، TimedOut، Conflict و...) —
+    # قبل از دسته‌های دیگه چک می‌شه چون معمولاً موقتی‌ان و نباید مثل باگ واقعی
+    # برنامه با Owner گزارش بشن (throttle جدا داره — پایین‌تر، ببین is_network_error).
+    "network": ("Network", ("network", "timeout", "timedout", "connect", "readerror",
+                             "httpx", "httpcore", "connection", "readtimeout", "pooltimeout")),
     "api": ("API", ("api", "groq", "http", "download", "yt-dlp", "instaloader")),
     "handler": ("Handler", ("handler", "callback", "button", "keyboard")),
     "database": ("Database", ("db", "database", "sqlite", "sql")),
@@ -70,6 +78,53 @@ BUG_CATEGORIES = {
     "downloader": ("Downloader", ("downloader", "youtube", "instagram", "tiktok", "twitter", "pinterest", "soundcloud")),
     "exception": ("Exception", ()),  # پیش‌فرض/باقی‌مونده
 }
+
+# NetworkError/ConnectionError/httpx/httpcore — طبق دستور کار، این‌ها خطای
+# «موقتی شبکه»ان، نه Bug اصلی برنامه. برای جلوگیری از اسپم شدن Owner با
+# ده‌ها پیام یکسان (مثلاً وقتی اینترنت Railway چند دقیقه قطع/وصل می‌شه)،
+# فقط یه‌بار در هر بازه‌ی _NETWORK_REPORT_COOLDOWN گزارش می‌فرستیم؛ در همون
+# بازه هر تکرار بعدی فقط شمارش و لاگ می‌شه، نه ارسال پیام جدید.
+_NETWORK_REPORT_COOLDOWN = 300  # ثانیه (۵ دقیقه)
+_network_error_state = {"last_report_ts": 0.0, "count_since_report": 0}
+
+
+def is_network_error(exc: BaseException) -> bool:
+    """تشخیص می‌ده یه Exception از جنس خطای موقتی شبکه/اتصال به تلگرام هست یا نه —
+    بدون نیاز به import مستقیم telegram.error (تا این ماژول به هیچ نسخه‌ی
+    خاصی از کتابخونه وابسته نشه)، فقط از روی نام کلاس‌های شناخته‌شده."""
+    try:
+        import httpx
+        if isinstance(exc, (httpx.TimeoutException, httpx.ConnectError, httpx.ReadError,
+                             httpx.ConnectTimeout, httpx.ReadTimeout, httpx.WriteTimeout,
+                             httpx.PoolTimeout, httpx.NetworkError)):
+            return True
+    except Exception:
+        pass
+    try:
+        from telegram.error import NetworkError as TgNetworkError, TimedOut as TgTimedOut
+        if isinstance(exc, (TgNetworkError, TgTimedOut)):
+            return True
+    except Exception:
+        pass
+    name = type(exc).__name__.lower()
+    return any(k in name for k in ("networkerror", "timedout", "connecterror", "readerror",
+                                    "connecttimeout", "readtimeout", "writetimeout", "pooltimeout"))
+
+
+def should_report_network_error():
+    """throttle: (should_send: bool, skipped_count: int) برمی‌گردونه.
+    فقط اگه از آخرین گزارشِ فرستاده‌شده بیشتر از cooldown گذشته باشه
+    should_send=True می‌شه (و شمارنده صفر می‌شه)؛ وگرنه فقط شمارنده بالا
+    می‌ره و should_send=False می‌مونه — یعنی این‌بار به Owner گزارش
+    نمی‌فرستیم، فقط لاگ می‌کنیم."""
+    now = time.monotonic()
+    if now - _network_error_state["last_report_ts"] >= _NETWORK_REPORT_COOLDOWN:
+        _network_error_state["last_report_ts"] = now
+        skipped = _network_error_state["count_since_report"]
+        _network_error_state["count_since_report"] = 0
+        return True, skipped
+    _network_error_state["count_since_report"] += 1
+    return False, _network_error_state["count_since_report"]
 
 
 def _categorize(kind: str) -> str:
@@ -105,10 +160,14 @@ def remember_error(kind, exc, *, chat_id=None, user_id=None, extra=None,
     و context آپدیتی که باعثش شده. هیچ‌کدوم از این‌ها با try/except قورت داده
     نمی‌شن؛ اگه دیتایی موجود نباشه فقط None/خالی می‌مونه، جعل نمی‌شه."""
     loc = locate_exception(exc)
+    # NetworkError/httpx.ReadError/TimedOut و... همیشه دسته‌ی "network" می‌گیرن،
+    # صرف‌نظر از اینکه kind (مثلاً "handle_update") چه کلیدواژه‌ای داره —
+    # چون این‌ها خطای موقتی اتصال‌ان، نه باگ واقعی همون بخش از برنامه.
+    category = "network" if is_network_error(exc) else _categorize(kind)
     item = {
         "time": datetime.now(timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S"),
         "kind": _clean(kind, 80),
-        "category": _categorize(kind),
+        "category": category,
         "exc_type": type(exc).__name__,
         "error": _clean(f"{type(exc).__name__}: {exc}", 1000),
         "chat_id": chat_id,
@@ -133,30 +192,50 @@ def remember_error(kind, exc, *, chat_id=None, user_id=None, extra=None,
     return item
 
 
-def format_error(item):
+def _h(value) -> str:
+    """html.escape کوتاه، برای فیلدهای دینامیک قبل از رفتن تو پیام HTML."""
+    import html as _html
+    return _html.escape(str(value), quote=False)
+
+
+def format_error(item, skipped_count=0):
+    """گزارش با parse_mode="HTML" فرستاده می‌شه (برای پشتیبانی از Custom
+    Emoji مرکزی)؛ برای همین همه‌ی فیلدهای دینامیک اینجا escape می‌شن تا
+    traceback/متن خطا (که ممکنه کاراکتر < > & داشته باشه) پارس HTML رو
+    خراب نکنه."""
+    is_net = item.get("category") == "network"
+    header_emoji = ce(CUSTOM_EMOJIS["warning"][0], "⚠️") if is_net else ce(CUSTOM_EMOJIS["breaking_news"][0], "🚨")
+    header = "خطای موقتی شبکه (Transient Network Error)" if is_net else "خطای جدید ربات گاتهام"
     lines = [
-        "🚨 *خطای جدید ربات گاتهام*",
+        f"{header_emoji} <b>{header}</b>",
         "",
-        f"🧩 بخش: {item['kind']}",
-        f"❌ خطا: `{item['error']}`",
-        f"🕐 زمان: {item['time']}",
+        f"🧩 بخش: {_h(item['kind'])}",
+        f"❌ خطا: <code>{_h(item['error'])}</code>",
+        f"🕐 زمان: {_h(item['time'])}",
     ]
+    if is_net and skipped_count:
+        lines.append(
+            f"🔁 در {_NETWORK_REPORT_COOLDOWN // 60} دقیقه‌ی اخیر {skipped_count} بار دیگه هم تکرار شده (بی‌صدا نادیده گرفته شدن)."
+        )
     # محل دقیق وقوع خطا (فایل/خط/تابع) — اگه از روی traceback پیدا شده باشه.
     if item.get("origin_file"):
-        lines.append(f"📍 محل: `{item['origin_file']}` خط `{item.get('origin_line')}` — تابع `{item.get('origin_function')}`")
+        lines.append(
+            f"📍 محل: <code>{_h(item['origin_file'])}</code> خط <code>{_h(item.get('origin_line'))}</code> — "
+            f"تابع <code>{_h(item.get('origin_function'))}</code>"
+        )
     if item.get("handler_function") and item.get("handler_function") != item.get("origin_function"):
-        lines.append(f"🎯 Handler: `{item['handler_function']}` (`{item.get('handler_file', '')}`)")
+        lines.append(f"🎯 Handler: <code>{_h(item['handler_function'])}</code> (<code>{_h(item.get('handler_file', ''))}</code>)")
     if item.get("update_type"):
-        lines.append(f"📨 نوع Update: `{item['update_type']}`")
+        lines.append(f"📨 نوع Update: <code>{_h(item['update_type'])}</code>")
     if item.get("chat_id") is not None:
-        lines.append(f"💬 Chat ID: `{item['chat_id']}`")
+        lines.append(f"💬 Chat ID: <code>{_h(item['chat_id'])}</code>")
     if item.get("user_id") is not None:
-        lines.append(f"👤 User ID: `{item['user_id']}`")
+        lines.append(f"👤 User ID: <code>{_h(item['user_id'])}</code>")
     if item.get("callback_data"):
-        lines.append(f"🔘 Callback Data: `{item['callback_data']}`")
+        lines.append(f"🔘 Callback Data: <code>{_h(item['callback_data'])}</code>")
     if item.get("extra"):
-        lines += ["", f"📌 جزئیات: {item['extra']}"]
-    lines += ["", "📄 Traceback:", f"```text\n{item['traceback']}\n```"]
+        lines += ["", f"📌 جزئیات: {_h(item['extra'])}"]
+    lines += ["", "📄 Traceback:", f"<pre>{_h(item['traceback'])}</pre>"]
     return "\n".join(lines)
 
 
@@ -166,8 +245,14 @@ async def report_error(bot: Bot, kind, exc, *, chat_id=None, user_id=None, extra
     if not owner_id:
         # bot.py currently has a hard-coded OWNER_ID; caller can pass it through extra
         return item
+    if is_network_error(exc):
+        should_send, skipped = should_report_network_error()
+        if not should_send:
+            return item
+    else:
+        skipped = 0
     try:
-        await bot.send_message(chat_id=int(owner_id), text=format_error(item), parse_mode="Markdown")
+        await bot.send_message(chat_id=int(owner_id), text=format_error(item, skipped_count=skipped), parse_mode="HTML")
     except Exception:
         pass
     return item
