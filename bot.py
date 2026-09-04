@@ -80,7 +80,7 @@ from dollar_price import register_dollar_price
 from compress_tools import register_compress
 from voice_to_text import register_voice_to_text
 from post_saz import register_post_saz, postsaz_intercept
-from mureka_music import register_mureka_music, mureka_intercept
+from treblo_music import register_treblo_music, treblo_intercept
 from safe_telegram import install_safe_telegram_patches
 from midnight_announcement import _get_all_chat_ids
 from group_admin_extra import register_group_admin_extra
@@ -4339,7 +4339,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 🎵 اگه کاربر تو سشن «ساخت آهنگ با هوش مصنوعی» فعاله (منتظر متن/سبک/عنوان)،
     # این پیام مال همون ابزاره — نباید AI/بازی‌ها روش واکنش نشون بدن. دقیقاً همون
     # الگوی postsaz_intercept بالا (context.user_data، صفر تداخل با بقیه‌ی هندلرها).
-    if await mureka_intercept(update, context):
+    if await treblo_intercept(update, context):
         return
 
     chat_id = update.effective_chat.id
@@ -5120,7 +5120,7 @@ def main():
     # --- تبدیل و فشرده‌سازی فایل (ریپلای + «فشرده») ---
     register_compress(app)
     register_post_saz(app, {"db_path": DB_PATH})  # 🎬 پست‌ساز گاتهام — «🛠 ابزارها»
-    register_mureka_music(app)  # 🎵 ساخت آهنگ با هوش مصنوعی (Mureka) — «🛠 ابزارها»
+    register_treblo_music(app)  # 🎵 ساخت آهنگ با هوش مصنوعی (Treblo) — «🛠 ابزارها»
 
     # --- تبدیل صدا به متن ---
     register_voice_to_text(app)

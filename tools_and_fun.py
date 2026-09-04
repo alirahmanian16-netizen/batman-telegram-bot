@@ -259,7 +259,7 @@ def tools_menu_keyboard():
         [InlineKeyboardButton("📐 تبدیل واحد", callback_data="tool:howto:convert"),
          InlineKeyboardButton("🧮 ماشین‌حساب", callback_data="tool:howto:calc")],
         [InlineKeyboardButton("🎬 پست‌ساز گاتهام", callback_data="postsaz:open")],
-        [InlineKeyboardButton("🎵 ساخت آهنگ با هوش مصنوعی", callback_data="mureka:start")],
+        [InlineKeyboardButton("🎵 ساخت آهنگ با هوش مصنوعی", callback_data="treblo:start")],
         [InlineKeyboardButton("💵 قیمت دلار", callback_data="gdollar:show")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="panel:main")],
     ])
