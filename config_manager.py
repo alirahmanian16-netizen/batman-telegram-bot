@@ -113,7 +113,10 @@ def _default_cache():
         "last_attempt": None,
         "last_refresh_failed": False,
         "sources": {
-            s["key"]: {"name": s["name"], "ok": False, "last_success": None, "raw_count": 0, "error": None}
+            s["key"]: {
+                "name": s["name"], "ok": False, "last_success": None,
+                "raw_count": 0, "error": None, "userinfo": None,
+            }
             for s in SOURCES
         },
         "configs": [],           # لیست نهایی Verified، مرتب‌شده بر اساس Latency
@@ -144,6 +147,7 @@ async def _refresh_cache(bot_data: dict, force: bool = False) -> dict:
             source_state["ok"] = True
             source_state["last_success"] = now
             source_state["error"] = None
+            source_state["userinfo"] = res.get("userinfo")
             cfgs = extract_configs_from_text(res["text"])
             source_state["raw_count"] = len(cfgs)
             parsed_all.extend(cfgs)
@@ -178,6 +182,15 @@ def _fmt_ts(ts):
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
 
 
+def _fmt_bytes(n: int) -> str:
+    val = float(n)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if val < 1024 or unit == "TB":
+            return f"{val:.2f} {unit}"
+        val /= 1024
+    return f"{val:.2f} TB"
+
+
 def _status_text(cache: dict) -> str:
     lines = ["🦇 *وضعیت منابع*", ""]
     for key, s in cache["sources"].items():
@@ -186,6 +199,26 @@ def _status_text(cache: dict) -> str:
         lines.append(f"آخرین بروزرسانی: {_fmt_ts(s['last_success'])}")
         if not s["ok"] and s.get("error"):
             lines.append(f"خطا: `{s['error']}`")
+        ui = s.get("userinfo")
+        if s["ok"] and ui:
+            # این آمار واقعیه (از هدر subscription-userinfo خودِ Source)، نه چیزی
+            # که ما ساخته باشیم — و مربوط به کل فایل Subscription است، نه یک
+            # کانفیگ خاص.
+            if ui.get("download") is not None:
+                lines.append(f"📥 دانلود (کل Source): {_fmt_bytes(ui['download'])}")
+            if ui.get("upload") is not None:
+                lines.append(f"📤 آپلود (کل Source): {_fmt_bytes(ui['upload'])}")
+            if ui.get("total") is not None:
+                lines.append(f"📦 مجموع مجاز: {_fmt_bytes(ui['total'])}")
+                used = (ui.get("upload") or 0) + (ui.get("download") or 0)
+                if ui["total"] > 0:
+                    remaining = max(ui["total"] - used, 0)
+                    lines.append(f"📊 باقی‌مانده: {_fmt_bytes(remaining)}")
+            if ui.get("expire"):
+                try:
+                    lines.append(f"⏳ انقضا: {datetime.fromtimestamp(ui['expire']).strftime('%Y-%m-%d')}")
+                except Exception:
+                    pass
         lines.append("")
     lines.append(f"📦 تعداد کل کانفیگ‌ها: {cache['total_parsed']}")
     lines.append(f"🟢 کانفیگ‌های قابل استفاده: {cache['verified_count']}")
