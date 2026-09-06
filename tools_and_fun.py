@@ -27,6 +27,7 @@ import math
 import random
 import secrets
 import string
+import asyncio
 import logging
 import operator as op
 from urllib.parse import quote
@@ -48,7 +49,10 @@ TOOLS_TEXT = (
     "🎬 پست‌ساز گاتهام: ویرایش/فشرده‌سازی/لوگو/کپشن برای ویدیو، عکس و گیف — از دکمه‌ی زیر.\n"
     "🎵 ساخت آهنگ با هوش مصنوعی: از متن آهنگ + سبک دلخواهت، یه آهنگ کامل می‌سازم — از دکمه‌ی زیر.\n"
     "✍️ اصلاح متن: بنویس «اصلاح <متن>» یا روی یه پیام ریپلای کن و بنویس «اصلاح» — غلط املایی/نیم‌فاصله/نگارشی رو درست می‌کنم، بدون تغییر معنی و لحن.\n"
-    "🎞 عکس به ویدیو: چندتا عکس بفرست تا برات یه ویدیوی اسلایدشو بسازم — از دکمه‌ی زیر."
+    "🎞 عکس به ویدیو: چندتا عکس بفرست تا برات یه ویدیوی اسلایدشو بسازم — از دکمه‌ی زیر.\n"
+    "🌐 تست سرعت: بنویس «تست سرعت» یا از دکمه‌ی زیر — سرعت اینترنتِ سروری که ربات روش اجراست رو نشون می‌ده.\n"
+    "📧 ایمیل موقت: بنویس «ایمیل موقت» یا از دکمه‌ی زیر — یه ایمیل یک‌بارمصرف برای خودت بساز.\n"
+    "🎙️ استودیو صدا: بنویس «استودیو صدا» یا از دکمه‌ی زیر — متن‌به‌گفتار، گفتار‌به‌متن، تغییر صدا، افکت صوتی و حذف نویز."
 )
 
 # کلید هوش مصنوعی — همون OPENROUTER_API_KEY که برای چت شخصیت‌ها و تشخیص
@@ -279,6 +283,81 @@ async def _correct_text_via_ai(text: str) -> str:
     return corrected
 
 
+# ------------------------------------------------------------------
+# 🌐 تست سرعت اینترنت — بدون API پولی، با کتابخونه‌ی speedtest-cli
+# ------------------------------------------------------------------
+
+SPEEDTEST_TRIGGERS = ("تست سرعت", "سرعت اینترنت", "اسپید تست")
+
+
+def _run_speedtest_sync() -> dict:
+    """این تابع Blocking هست و باید تو یه Thread جدا (run_in_executor) صدا زده
+    بشه تا موقع تست، کل ربات برای بقیه‌ی کاربرها هنگ نکنه."""
+    import speedtest
+
+    st = speedtest.Speedtest()
+    st.get_best_server()
+    download_mbps = st.download() / 1_000_000
+    upload_mbps = st.upload() / 1_000_000
+    ping_ms = st.results.ping
+    server = st.results.server or {}
+    return {
+        "download": download_mbps,
+        "upload": upload_mbps,
+        "ping": ping_ms,
+        "server_name": server.get("sponsor", "نامشخص"),
+        "server_country": server.get("country", ""),
+    }
+
+
+async def _do_speedtest():
+    loop = asyncio.get_running_loop()
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(None, _run_speedtest_sync), timeout=60
+        )
+    except asyncio.TimeoutError:
+        return {"error": "⚠️ تست سرعت بیش از حد طول کشید، یه‌کم بعد دوباره امتحان کن."}
+    except ModuleNotFoundError:
+        return {"error": "⚠️ کتابخونه‌ی تست سرعت رو سرور نصب نیست."}
+    except Exception as e:
+        log.info(f"speedtest failed: {e}")
+        return {
+            "error": "⚠️ تست سرعت الان جواب نداد (شاید سرور به speedtest.net دسترسی نداره)، بعداً دوباره امتحان کن."
+        }
+
+
+def _format_speedtest_result(result: dict) -> str:
+    return (
+        "🌐 *نتیجه‌ی تست سرعت*\n\n"
+        f"📥 دانلود: {result['download']:.1f} Mbps\n"
+        f"📤 آپلود: {result['upload']:.1f} Mbps\n"
+        f"📶 پینگ: {result['ping']:.0f} ms\n"
+        f"🖥 سرور تست: {result['server_name']} ({result['server_country']})\n\n"
+        "⚠️ این سرعتِ اینترنتِ سروری‌ه که ربات روش اجرا می‌شه، نه سرعت اینترنت خودت."
+    )
+
+
+async def speed_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    msg = update.effective_message
+    text = (msg.text or "").strip()
+    if text not in SPEEDTEST_TRIGGERS:
+        return False
+
+    status = await msg.reply_text(
+        "🌐 در حال تست سرعت اینترنت سرور گاتهام... (ممکنه ۱۰ تا ۳۰ ثانیه طول بکشه)"
+    )
+    result = await _do_speedtest()
+    if "error" in result:
+        await status.edit_text(result["error"])
+        return True
+    try:
+        await status.edit_text(_format_speedtest_result(result), parse_mode="Markdown")
+    except Exception:
+        await msg.reply_text(_format_speedtest_result(result), parse_mode="Markdown")
+    return True
+
+
 JOKES = [
     "به مهندس نرم‌افزار گفتن چراغو خاموش کن، گفت صبر کن دارم debug می‌کنم چرا روشنه!",
     "دو تا آنتن رو پشت‌بوم همو دیدن، یکی گفت سلام، اون یکی گفت این چه استقبال گرمی بود، من که فقط signal دادم!",
@@ -307,6 +386,9 @@ def tools_menu_keyboard():
         [InlineKeyboardButton("🎵 ساخت آهنگ با هوش مصنوعی", callback_data="mureka:start")],
         [InlineKeyboardButton("✍️ اصلاح متن", callback_data="tool:howto:correct")],
         [InlineKeyboardButton("🎞 عکس به ویدیو", callback_data="img2v:start")],
+        [InlineKeyboardButton("🌐 تست سرعت", callback_data="tool:speedtest")],
+        [InlineKeyboardButton("📧 ایمیل موقت", callback_data="mail:menu")],
+        [InlineKeyboardButton("🎙️ استودیو صدا", callback_data="voice:menu")],
         [InlineKeyboardButton("💵 قیمت دلار", callback_data="gdollar:show")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="panel:main")],
     ])
@@ -501,6 +583,8 @@ def register_tools_and_fun(app):
             return
         if await correct_handler(update, context):
             return
+        if await speed_handler(update, context):
+            return
 
     async def tool_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -526,6 +610,21 @@ def register_tools_and_fun(app):
             await query.answer(
                 "بنویس «اصلاح <متن>» یا روی پیامی ریپلای کن و بنویس «اصلاح»", show_alert=True
             )
+            return
+        if data == "tool:speedtest":
+            status = await query.message.reply_text(
+                "🌐 در حال تست سرعت اینترنت سرور گاتهام... (ممکنه ۱۰ تا ۳۰ ثانیه طول بکشه)"
+            )
+            result = await _do_speedtest()
+            if "error" in result:
+                await status.edit_text(result["error"])
+                return
+            try:
+                await status.edit_text(_format_speedtest_result(result), parse_mode="Markdown")
+            except Exception:
+                await query.message.reply_text(
+                    _format_speedtest_result(result), parse_mode="Markdown"
+                )
             return
 
     async def fun_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

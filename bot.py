@@ -88,6 +88,8 @@ from new_features_extra import register_new_features
 from fortune_and_extras import register_fortune_and_extras
 from reminders import register_reminders, build_reminder_menu_keyboard, REMINDER_MENU_TEXT
 from image_to_video import register_image_to_video
+from temp_mail import register_temp_mail
+from elevenlabs_service import register_elevenlabs_service
 from media_recognition import register_media_recognition
 
 # کلمات شروع بازی‌های games_pack2.py و games_pack4.py که سیستم بازی‌های اصلی
@@ -3470,6 +3472,10 @@ _FOREIGN_CALLBACK_PREFIXES = (
     "rem:",
     # 🎞 عکس به ویدیو (image_to_video.py) — همون کلاس باگ.
     "img2v:",
+    # 📧 ایمیل موقت (temp_mail.py) — همون کلاس باگ.
+    "mail:",
+    # 🎙️ استودیو صدا ElevenLabs (elevenlabs_service.py) — همون کلاس باگ.
+    "voice:",
 )
 
 
@@ -5136,6 +5142,8 @@ def main():
     register_compress(app)
     register_post_saz(app, {"db_path": DB_PATH})  # 🎬 پست‌ساز گاتهام — «🛠 ابزارها»
     register_image_to_video(app)  # 🎞 عکس به ویدیو (FFmpeg، بدون API) — «🛠 ابزارها»
+    register_temp_mail(app, {"db_path": DB_PATH})  # 📧 ایمیل موقت (Mail.tm، بدون API) — «🛠 ابزارها»
+    register_elevenlabs_service(app)  # 🎙️ استودیو صدا (ElevenLabs) — «🛠 ابزارها»
     register_mureka_music(app)  # 🎵 ساخت آهنگ با هوش مصنوعی (Mureka) — «🛠 ابزارها»
 
     # --- تبدیل صدا به متن ---

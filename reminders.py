@@ -716,9 +716,10 @@ def register_reminders(app, deps):
 
     # 🆕 منوی تعاملی (دکمه‌ای) با تاریخ شمسی و تکرار
     app.add_handler(CallbackQueryHandler(reminder_button_callback, pattern=r"^rem:"), group=28)
-    # کچرِ ورودی متنیِ فلو — تو گروه جدا (۳۰) تا رو بقیه‌ی هندلرها تاثیر نذاره
+    # کچرِ ورودی متنیِ فلو — تو گروه جدا (۱۶) تا رو بقیه‌ی هندلرهای متنیِ
+    # پرکاربردِ ربات (مثل بازی‌های گروهی) تاثیر نذاره.
     app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, reminder_flow_text_handler), group=30
+        MessageHandler(filters.TEXT & ~filters.COMMAND, reminder_flow_text_handler), group=16
     )
 
     _reload_pending_on_startup(app, db_path)
