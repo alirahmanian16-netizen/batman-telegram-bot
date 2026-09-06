@@ -20,6 +20,7 @@ register_tools_and_fun(app) — مستقل از بقیه‌ی ماژول‌ها�
 httpx استفاده می‌کنه که از قبل تو requirements هست.
 """
 
+import os
 import re
 import ast
 import math
@@ -45,8 +46,15 @@ TOOLS_TEXT = (
     "🧮 ماشین‌حساب: بنویس «حساب <عبارت>» (مثل «حساب (۱۲+۳)*۲» یا «حساب sqrt(81)»).\n"
     "💵 قیمت دلار: فقط بنویس «دلار» (یا دکمه‌ی زیر) تا قیمت لحظه‌ای دلار آزاد رو بگیری.\n"
     "🎬 پست‌ساز گاتهام: ویرایش/فشرده‌سازی/لوگو/کپشن برای ویدیو، عکس و گیف — از دکمه‌ی زیر.\n"
-    "🎵 ساخت آهنگ با هوش مصنوعی: از متن آهنگ + سبک دلخواهت، یه آهنگ کامل می‌سازم — از دکمه‌ی زیر."
+    "🎵 ساخت آهنگ با هوش مصنوعی: از متن آهنگ + سبک دلخواهت، یه آهنگ کامل می‌سازم — از دکمه‌ی زیر.\n"
+    "✍️ اصلاح متن: بنویس «اصلاح <متن>» یا روی یه پیام ریپلای کن و بنویس «اصلاح» — غلط املایی/نیم‌فاصله/نگارشی رو درست می‌کنم، بدون تغییر معنی و لحن.\n"
+    "🎞 عکس به ویدیو: چندتا عکس بفرست تا برات یه ویدیوی اسلایدشو بسازم — از دکمه‌ی زیر."
 )
+
+# کلید هوش مصنوعی — همون OPENROUTER_API_KEY که برای چت شخصیت‌ها و تشخیص
+# فیلم/سریال هم استفاده می‌شه (media_recognition.py)، اینجا هم مستقل خونده
+# می‌شه تا این ماژول به bot.py وابسته نباشه.
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
 PERSIAN_DIGITS_TRANS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
 
@@ -234,6 +242,43 @@ def _gen_password(length=16) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+CORRECT_TRIGGERS = ("اصلاح", "غلط‌گیری", "غلط گیری")
+
+_CORRECTION_SYSTEM_PROMPT = (
+    "تو یه ویراستار حرفه‌ای متن فارسی و انگلیسی هستی. متنی که کاربر می‌فرسته رو فقط "
+    "از نظر غلط املایی، نیم‌فاصله و علائم نگارشی اصلاح کن. معنی، لحن و سبک نویسنده رو "
+    "اصلاً عوض نکن و چیزی به متن اضافه یا از اون کم نکن. فقط و فقط خودِ متنِ اصلاح‌شده رو "
+    "برگردون، بدون هیچ توضیح، مقدمه یا جمله‌ی اضافه."
+)
+
+
+async def _correct_text_via_ai(text: str) -> str:
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://github.com/",
+                "X-Title": "Gotham Telegram Bot",
+            },
+            json={
+                "model": "openai/gpt-oss-120b",
+                "messages": [
+                    {"role": "system", "content": _CORRECTION_SYSTEM_PROMPT},
+                    {"role": "user", "content": text},
+                ],
+                "max_tokens": 800,
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    corrected = data["choices"][0]["message"]["content"].strip()
+    if not corrected:
+        raise ValueError("empty correction result")
+    return corrected
+
+
 JOKES = [
     "به مهندس نرم‌افزار گفتن چراغو خاموش کن، گفت صبر کن دارم debug می‌کنم چرا روشنه!",
     "دو تا آنتن رو پشت‌بوم همو دیدن، یکی گفت سلام، اون یکی گفت این چه استقبال گرمی بود، من که فقط signal دادم!",
@@ -259,7 +304,9 @@ def tools_menu_keyboard():
         [InlineKeyboardButton("📐 تبدیل واحد", callback_data="tool:howto:convert"),
          InlineKeyboardButton("🧮 ماشین‌حساب", callback_data="tool:howto:calc")],
         [InlineKeyboardButton("🎬 پست‌ساز گاتهام", callback_data="postsaz:open")],
-        [InlineKeyboardButton("🎵 ساخت آهنگ با هوش مصنوعی", callback_data="treblo:start")],
+        [InlineKeyboardButton("🎵 ساخت آهنگ با هوش مصنوعی", callback_data="mureka:start")],
+        [InlineKeyboardButton("✍️ اصلاح متن", callback_data="tool:howto:correct")],
+        [InlineKeyboardButton("🎞 عکس به ویدیو", callback_data="img2v:start")],
         [InlineKeyboardButton("💵 قیمت دلار", callback_data="gdollar:show")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="panel:main")],
     ])
@@ -308,6 +355,46 @@ def register_tools_and_fun(app):
             await msg.reply_text("⚠️ ترجمه الان جواب نداد، یه‌کم بعد دوباره امتحان کن.")
             return True
         await msg.reply_text(f"🌐 {result}")
+        return True
+
+    async def correct_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+        """✍️ اصلاح غلط املایی/نیم‌فاصله/نگارشی — با همون هوش مصنوعیِ ربات
+        (OPENROUTER_API_KEY)، بدون تغییر معنی یا لحن متن."""
+        msg = update.effective_message
+        text = (msg.text or "").strip()
+        matched = None
+        for trig in CORRECT_TRIGGERS:
+            if text == trig or text.startswith(trig + " "):
+                matched = trig
+                break
+        if matched is None:
+            return False
+
+        target_text = text[len(matched):].strip()
+        if not target_text and msg.reply_to_message and msg.reply_to_message.text:
+            target_text = msg.reply_to_message.text
+
+        if not target_text:
+            await msg.reply_text(
+                "✏️ متنی که می‌خوای اصلاح کنم رو بفرست، یا روی یه پیام ریپلای کن و بنویس «اصلاح»."
+            )
+            return True
+
+        if not OPENROUTER_API_KEY:
+            await msg.reply_text("⚠️ کلید هوش مصنوعی (OPENROUTER_API_KEY) تنظیم نشده.")
+            return True
+
+        if len(target_text) > 2000:
+            target_text = target_text[:2000]
+
+        try:
+            corrected = await _correct_text_via_ai(target_text)
+        except Exception as e:
+            log.info(f"text correction failed: {e}")
+            await msg.reply_text("⚠️ سرویس اصلاح متن الان جواب نداد، یه‌کم بعد دوباره امتحان کن.")
+            return True
+
+        await msg.reply_text(f"✍️ متن اصلاح‌شده:\n\n{corrected}")
         return True
 
     async def qr_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -412,6 +499,8 @@ def register_tools_and_fun(app):
             return
         if await translate_handler(update, context):
             return
+        if await correct_handler(update, context):
+            return
 
     async def tool_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -432,6 +521,11 @@ def register_tools_and_fun(app):
             return
         if data == "tool:howto:calc":
             await query.answer("بنویس مثلاً: حساب (12+3)*2 یا حساب sqrt(81)", show_alert=True)
+            return
+        if data == "tool:howto:correct":
+            await query.answer(
+                "بنویس «اصلاح <متن>» یا روی پیامی ریپلای کن و بنویس «اصلاح»", show_alert=True
+            )
             return
 
     async def fun_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):

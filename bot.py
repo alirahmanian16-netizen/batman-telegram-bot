@@ -80,13 +80,14 @@ from dollar_price import register_dollar_price
 from compress_tools import register_compress
 from voice_to_text import register_voice_to_text
 from post_saz import register_post_saz, postsaz_intercept
-from treblo_music import register_treblo_music, treblo_intercept
+from mureka_music import register_mureka_music, mureka_intercept
 from safe_telegram import install_safe_telegram_patches
 from midnight_announcement import _get_all_chat_ids
 from group_admin_extra import register_group_admin_extra
 from new_features_extra import register_new_features
 from fortune_and_extras import register_fortune_and_extras
-from reminders import register_reminders
+from reminders import register_reminders, build_reminder_menu_keyboard, REMINDER_MENU_TEXT
+from image_to_video import register_image_to_video
 from media_recognition import register_media_recognition
 
 # کلمات شروع بازی‌های games_pack2.py و games_pack4.py که سیستم بازی‌های اصلی
@@ -3464,6 +3465,11 @@ _FOREIGN_CALLBACK_PREFIXES = (
     # 🦇 پنل کنترل Owner (شماره‌ها/کاربران/گروه‌ها) — هندلر مخصوص خودش
     # (owner_control_callback) با pattern جدا ثبت می‌شه؛ دفاع دوم اینجا.
     "ownerinfo:",
+    # ⏰ منوی تعاملی یادآوری (reminders.py) — همون کلاس باگ؛ دکمه‌های ساخت/
+    # لیست/ویرایش/حذف یادآور با CallbackQueryHandler مخصوص خودشون ثبت می‌شن.
+    "rem:",
+    # 🎞 عکس به ویدیو (image_to_video.py) — همون کلاس باگ.
+    "img2v:",
 )
 
 
@@ -3477,6 +3483,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # قبلاً اینجا همیشه query.answer() خالی صدا زده می‌شد و بعد پایین‌تر
     # برای دکمه‌های PANEL_INFO_TEXTS دوباره query.answer(..., show_alert=True)
     # صدا زده می‌شد که همیشه خطا می‌داد و باعث می‌شد دکمه هیچ کاری نکنه.
+    # ⏰ دکمه‌ی «یادآور» دیگه فقط یه Alert ساکن نیست — منوی تعاملی واقعی
+    # (ساخت/لیست/ویرایش/حذف با تاریخ شمسی و تکرار) رو باز می‌کنه.
+    if data == "panel:reminder_info":
+        await query.answer()
+        await query.edit_message_text(
+            REMINDER_MENU_TEXT, reply_markup=build_reminder_menu_keyboard(), parse_mode="Markdown"
+        )
+        return
+
     if data in PANEL_INFO_TEXTS:
         await query.answer(PANEL_INFO_TEXTS[data], show_alert=True)
         return
@@ -4339,7 +4354,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 🎵 اگه کاربر تو سشن «ساخت آهنگ با هوش مصنوعی» فعاله (منتظر متن/سبک/عنوان)،
     # این پیام مال همون ابزاره — نباید AI/بازی‌ها روش واکنش نشون بدن. دقیقاً همون
     # الگوی postsaz_intercept بالا (context.user_data، صفر تداخل با بقیه‌ی هندلرها).
-    if await treblo_intercept(update, context):
+    if await mureka_intercept(update, context):
         return
 
     chat_id = update.effective_chat.id
@@ -5120,7 +5135,8 @@ def main():
     # --- تبدیل و فشرده‌سازی فایل (ریپلای + «فشرده») ---
     register_compress(app)
     register_post_saz(app, {"db_path": DB_PATH})  # 🎬 پست‌ساز گاتهام — «🛠 ابزارها»
-    register_treblo_music(app)  # 🎵 ساخت آهنگ با هوش مصنوعی (Treblo) — «🛠 ابزارها»
+    register_image_to_video(app)  # 🎞 عکس به ویدیو (FFmpeg، بدون API) — «🛠 ابزارها»
+    register_mureka_music(app)  # 🎵 ساخت آهنگ با هوش مصنوعی (Mureka) — «🛠 ابزارها»
 
     # --- تبدیل صدا به متن ---
     register_voice_to_text(app)
