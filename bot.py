@@ -91,6 +91,7 @@ from image_to_video import register_image_to_video
 from temp_mail import register_temp_mail
 from elevenlabs_service import register_elevenlabs_service
 from media_recognition import register_media_recognition
+from config_manager import register_gotham_config, GOTHAM_CONFIG_TEXT, gotham_config_main_keyboard
 
 # کلمات شروع بازی‌های games_pack2.py و games_pack4.py که سیستم بازی‌های اصلی
 # (games.py/is_game_text) از اون‌ها خبر نداره - برای همینه که جدا نگه‌شون داشتیم.
@@ -1538,6 +1539,7 @@ def build_panel_main_keyboard(is_owner: bool = False):
          InlineKeyboardButton("🎉 سرگرمی", callback_data="panel:fun")],
         [InlineKeyboardButton("🔐 امنیت", callback_data="panel:security"),
          InlineKeyboardButton("ℹ️ درباره ربات", callback_data="panel:about")],
+        [InlineKeyboardButton("🦇 کانفیگ گاتهام", callback_data="panel:gotham_config")],
     ]
     last_row = [InlineKeyboardButton("🧩 امکانات دیگر", callback_data="panel:new")]
     if is_owner:
@@ -3476,6 +3478,10 @@ _FOREIGN_CALLBACK_PREFIXES = (
     "mail:",
     # 🎙️ استودیو صدا ElevenLabs (elevenlabs_service.py) — همون کلاس باگ.
     "voice:",
+    # 🦇 کانفیگ گاتهام (config_manager.py) — همون کلاس باگ؛ دکمه‌های انتخاب
+    # برنامه/دریافت لینک/QR/TXT/بروزرسانی با CallbackQueryHandler مخصوص
+    # خودشون (pattern="^gconf:") ثبت می‌شن.
+    "gconf:",
 )
 
 
@@ -3725,6 +3731,12 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "panel:fun":
         await query.edit_message_text(FUN_TEXT, reply_markup=fun_menu_keyboard(), parse_mode="Markdown")
+        return
+
+    if data == "panel:gotham_config":
+        await query.edit_message_text(
+            GOTHAM_CONFIG_TEXT, reply_markup=gotham_config_main_keyboard(), parse_mode="Markdown"
+        )
         return
 
     if data == "panel:words":
@@ -5148,6 +5160,9 @@ def main():
 
     # --- تبدیل صدا به متن ---
     register_voice_to_text(app)
+
+    # --- 🦇 کانفیگ گاتهام: کانفیگ رایگان V2Ray/Xray از منابع عمومی — «🦇 کانفیگ گاتهام» ---
+    register_gotham_config(app, {"owner_id": OWNER_ID})
 
     # --- مدیریت گروه: قفل/باز کردن + پاکسازی ---
     register_group_admin_extra(app, {"is_group_admin": is_group_admin, "owner_id": OWNER_ID})
