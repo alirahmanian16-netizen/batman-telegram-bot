@@ -92,6 +92,7 @@ from temp_mail import register_temp_mail
 from elevenlabs_service import register_elevenlabs_service
 from media_recognition import register_media_recognition
 from config_manager import register_gotham_config, GOTHAM_CONFIG_TEXT, gotham_config_main_keyboard
+from api_monitor import register_api_monitor
 
 # کلمات شروع بازی‌های games_pack2.py و games_pack4.py که سیستم بازی‌های اصلی
 # (games.py/is_game_text) از اون‌ها خبر نداره - برای همینه که جدا نگه‌شون داشتیم.
@@ -5183,6 +5184,9 @@ def main():
 
     # --- تشخیص فیلم/سریال از عکس یا ویدیو، تشخیص آهنگ، خلاصه‌ی گروه ---
     register_media_recognition(app)
+
+    # --- 🦇 GOTHAM API MONITOR: وضعیت API Key سرویس‌ها — فقط Owner (/key_status) ---
+    register_api_monitor(app, {"owner_id": OWNER_ID})
 
     # --- ۶ امکان دیگه: فال، اسلات، پرونده روز، کوییز شخصیت، کپسول زمان، شهروند نمونه ---
     register_fortune_and_extras(app, {

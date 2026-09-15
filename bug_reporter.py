@@ -145,8 +145,13 @@ def _clean(value, limit=1200):
     # خطای شبکه/HTTP متن کلید واقعی رو تو خودش داشت (مثلاً تو URL یا هدر)،
     # بدون سانسور مستقیم به پیام خطای اونر می‌رفت. الان همه‌ی کلیدهای حساس
     # پروژه سانسور می‌شن.
+    # 🦇 api_monitor.py هم به همین کلیدها وصل می‌شه (فقط Read، خودش هیچی چاپ
+    # نمی‌کنه)، ولی اگه یه خطای شبکه/HTTP از این سرویس‌ها متن کلید رو تو خودش
+    # داشته باشه (مثلاً تو URL یا هدر یه Exception)، باید همینجا هم سانسور بشه.
     for secret_name in (
         "OPENROUTER_API_KEY", "BOT_TOKEN", "TMDB_API_KEY", "AUDD_API_TOKEN", "GROQ_API_KEY",
+        "ELEVENLABS_API_KEY", "MUREKA_API_KEY", "TREBLO_API_KEY", "DOLLAR_API_KEY",
+        "OPENAI_API_KEY", "FREELLMAPI_API_KEY",
     ):
         secret = os.getenv(secret_name)
         if secret:

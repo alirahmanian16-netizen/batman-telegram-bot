@@ -17,6 +17,13 @@ tg_resilience.py
     - RetryAfter (Flood control): طبق زمانی که تلگرام گفته صبر می‌کنه و یه بار
       Retry می‌کنه، به‌جای اینکه پیام کامل گم بشه.
     - TimedOut: یه بار Retry ساده.
+    - NetworkError (شامل «Bad Gateway» و httpx.ReadError که از پایین به این
+      شکل بالا میان): قبلاً این کلاس اصلاً اینجا هندل نمی‌شد — یعنی یه خطای
+      کاملاً موقتی شبکه (502 از سمت تلگرام، قطعی لحظه‌ای Railway) مستقیم
+      می‌رفت رو global_error_handler و پیام کاربر گم می‌شد. الان یه بار،
+      بعد از یه backoff کوتاه (نه Retry بی‌نهایت، نه Loop سریع)، Retry
+      می‌شه؛ اگه بازم شکست خورد، Exception بالا می‌ره تا bug_reporter طبق
+      cooldown خودش (۵ دقیقه) گزارشش کنه.
 
 ⚠️ این پچ فقط رو *نمونه‌ی* app.bot اعمال می‌شه (نه رو کلاس Bot)، و فقط رو
 مسیرهای خطا اثر می‌ذاره — هیچ رفتار موفقیت‌آمیزِ فعلیِ هیچ ماژولی
@@ -26,12 +33,13 @@ self-contained است؛ اگه حذفش کنی همه‌چیز دقیقاً به
 import asyncio
 import logging
 
-from telegram.error import BadRequest, RetryAfter, TimedOut
+from telegram.error import BadRequest, RetryAfter, TimedOut, NetworkError
 
 log = logging.getLogger(__name__)
 
 _EMPTY_TEXT_FALLBACK = "🦇 …"
 _MAX_RETRY_AFTER_WAIT = 30
+_NETWORK_RETRY_BACKOFF_SECONDS = 2  # فقط یه Retry کوتاه، نه Loop/Retry بی‌نهایت
 
 
 def _has(msg: str, needle: str) -> bool:
@@ -95,6 +103,14 @@ def patch_bot_resilience(app):
             except Exception as e2:
                 log.info(f"send_message: retry بعد از TimedOut هم شکست خورد: {e2}")
                 return None
+        except NetworkError as e:
+            log.info(f"send_message: NetworkError موقتی ({e}) — {_NETWORK_RETRY_BACKOFF_SECONDS}s صبر و یه Retry")
+            await asyncio.sleep(_NETWORK_RETRY_BACKOFF_SECONDS)
+            try:
+                return await orig_send_message(*args, **kwargs)
+            except Exception as e2:
+                log.info(f"send_message: retry بعد از NetworkError هم شکست خورد: {e2}")
+                raise
 
     async def safe_edit_message_text(*args, **kwargs):
         # edit_message_text(self, text, chat_id=None, ...) → text پوزیشنال، اندیس 0
@@ -129,6 +145,14 @@ def patch_bot_resilience(app):
             except Exception as e2:
                 log.info(f"edit_message_text: retry بعد از TimedOut هم شکست خورد: {e2}")
                 return None
+        except NetworkError as e:
+            log.info(f"edit_message_text: NetworkError موقتی ({e}) — {_NETWORK_RETRY_BACKOFF_SECONDS}s صبر و یه Retry")
+            await asyncio.sleep(_NETWORK_RETRY_BACKOFF_SECONDS)
+            try:
+                return await orig_edit_message_text(*args, **kwargs)
+            except Exception as e2:
+                log.info(f"edit_message_text: retry بعد از NetworkError هم شکست خورد: {e2}")
+                raise
 
     bot.send_message = safe_send_message
     bot.edit_message_text = safe_edit_message_text
@@ -164,6 +188,10 @@ def patch_bot_resilience(app):
                         log.info(f"{method_name}: retry بدون parse_mode هم شکست خورد: {e}")
                         raise e
                 raise
+            # NetworkError عمداً بدون Retry اینجا: طبق نکته‌ی بالای فایل، آپلود
+            # فایل حجیمه و Retry خودکارش هزینه‌بره (ممکنه فایل partial ارسال
+            # شده باشه) — همون رفتار قبلی (بدون Retry، فقط Exception بالا
+            # می‌ره تا bug_reporter طبق cooldown گزارشش کنه) حفظ می‌شه.
 
         setattr(bot, method_name, safe_method)
 
