@@ -93,6 +93,7 @@ from elevenlabs_service import register_elevenlabs_service
 from media_recognition import register_media_recognition
 from config_manager import register_gotham_config, GOTHAM_CONFIG_TEXT, gotham_config_main_keyboard
 from api_monitor import register_api_monitor
+from soroush_downloader import register_soroush
 
 # کلمات شروع بازی‌های games_pack2.py و games_pack4.py که سیستم بازی‌های اصلی
 # (games.py/is_game_text) از اون‌ها خبر نداره - برای همینه که جدا نگه‌شون داشتیم.
@@ -1546,6 +1547,9 @@ def build_panel_main_keyboard(is_owner: bool = False):
     if is_owner:
         last_row.append(InlineKeyboardButton("📜 همه کلمات ربات", callback_data="panel:words"))
     rows.append(last_row)
+    if is_owner:
+        # 🦇 اتصال Soroush Plus (soroush_downloader.py) -- فقط Owner می‌بینتش
+        rows.append([InlineKeyboardButton("🦇 اتصال سروش‌پلاس", callback_data="srs:menu")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -3483,6 +3487,9 @@ _FOREIGN_CALLBACK_PREFIXES = (
     # برنامه/دریافت لینک/QR/TXT/بروزرسانی با CallbackQueryHandler مخصوص
     # خودشون (pattern="^gconf:") ثبت می‌شن.
     "gconf:",
+    # 🦇 اتصال Soroush Plus + دانلود استوری سروش (soroush_downloader.py) --
+    # همون کلاس باگ؛ هندلر مخصوص خودش با pattern="^srs:" ثبت می‌شه.
+    "srs:",
 )
 
 
@@ -5210,6 +5217,7 @@ def main():
     register_card_room(app)  # 🃏 اتاق پاسور: جنگ / بیست‌ویک / بلک‌جک / حکم (دونفره)
     register_gotham_games(app)  # 🎟️ بازی‌های استیکری بتمن: بازی سریع + نفرین ریدلر
     register_downloader(app)  # دانلودر اینستاگرام / یوتیوب / پینترست
+    register_soroush(app, {"owner_id": OWNER_ID})  # 🦇 اتصال Soroush Plus + دانلود استوری سروش
     register_ttt_inline(app)  # دوز inline (۳×۳ تا ۸×۸، با دوست یا با ربات) — نیاز به فعال بودن Inline Mode تو BotFather
     register_ttt_gotham(app)  # دوز گاتهام — با نوشتن کلمه تو چت، بدون نیاز به inline mode
 

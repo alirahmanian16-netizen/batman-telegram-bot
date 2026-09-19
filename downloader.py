@@ -209,6 +209,9 @@ def _dl_menu_markup():
          InlineKeyboardButton(PLATFORM_LABELS["twitter"], callback_data="dl:pick:twitter")],
         [InlineKeyboardButton(PLATFORM_LABELS["pinterest"], callback_data="dl:pick:pinterest"),
          InlineKeyboardButton(PLATFORM_LABELS["soundcloud"], callback_data="dl:pick:soundcloud")],
+        # 🦇 دانلود استوری سروش‌پلاس (soroush_downloader.py) -- callback جدا با
+        # پیشوند "srs:" تا با هندلر "dl:pick:" بالا تداخل نکنه.
+        [InlineKeyboardButton("📱 دانلود استوری سروش", callback_data="srs:dl:menu")],
         [InlineKeyboardButton("🔙 بازگشت", callback_data="panel:main")],
     ])
 
