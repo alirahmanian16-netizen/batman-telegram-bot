@@ -18,6 +18,7 @@ register_soroush(app, deps) طبق همون الگوی register_xxx(app, deps) �
 """
 
 import os
+import re
 import shutil
 import asyncio
 import logging
@@ -201,10 +202,23 @@ async def srs_story_menu_callback(update: Update, context: ContextTypes.DEFAULT_
 
 
 def _normalize_target(raw: str):
-    raw = raw.strip().lstrip("@")
-    if raw.isdigit():
+    """آیدی عددی -> int؛ یوزرنیم/لینک -> '@username' (SplusLib فقط '@username'
+    رو به‌عنوان یوزرنیم می‌شناسه؛ یوزرنیم لخت ممکنه resolve نشه)."""
+    raw = raw.strip()
+    m = re.search(r"(?:splus\.ir|sapp\.ir|soroush\S*?)/([A-Za-z0-9_]{3,})", raw)
+    if m:
+        raw = m.group(1)
+    raw = raw.lstrip("@").strip()
+    if raw.lstrip("-").isdigit():
         return int(raw)
-    return raw
+    return "@" + raw
+
+
+def _err_line(message_is_owner: bool, e: Exception) -> str:
+    base = "⚠️ هنگام دریافت استوری خطایی رخ داد. لطفاً دوباره تلاش کنید."
+    if message_is_owner:
+        return f"{base}\n\nدلیل (فقط برای مالک): {type(e).__name__}: {_safe_err_text(e, 200)}"
+    return base
 
 
 async def _download_and_send_stories(update: Update, context: ContextTypes.DEFAULT_TYPE, target):
@@ -219,6 +233,7 @@ async def _download_and_send_stories(update: Update, context: ContextTypes.DEFAU
         return
 
     errors = sc.splus_errors
+    _owner = _is_owner(update)
 
     async def _fetch(client):
         return await client.has_story(target)
@@ -228,8 +243,8 @@ async def _download_and_send_stories(update: Update, context: ContextTypes.DEFAU
     except sc.SoroushNotConfigured:
         await message.reply_text("❌ اکانت سروش‌پلاس متصل نیست.")
         return
-    except asyncio.TimeoutError:
-        await message.reply_text("⚠️ هنگام دریافت استوری خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+    except asyncio.TimeoutError as e:
+        await message.reply_text(_err_line(_owner, e))
         return
     except Exception as e:
         name = type(e).__name__
@@ -239,7 +254,7 @@ async def _download_and_send_stories(update: Update, context: ContextTypes.DEFAU
             await message.reply_text("❌ کاربر سروش‌پلاس پیدا نشد.")
         else:
             log.warning(f"⚠️ خطای has_story سروش: {name}", exc_info=True)
-            await message.reply_text("⚠️ هنگام دریافت استوری خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+            await message.reply_text(_err_line(_owner, e))
         return
 
     if not info or not info.get("has_story"):
@@ -271,8 +286,8 @@ async def _download_and_send_stories(update: Update, context: ContextTypes.DEFAU
                     await context.bot.send_video(chat_id=chat_id, video=f)
                 else:
                     await context.bot.send_photo(chat_id=chat_id, photo=f)
-        except asyncio.TimeoutError:
-            await message.reply_text("⚠️ هنگام دریافت استوری خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        except asyncio.TimeoutError as e:
+            await message.reply_text(_err_line(_owner, e))
         except Exception as e:
             name = type(e).__name__
             if errors and isinstance(e, (
@@ -282,7 +297,7 @@ async def _download_and_send_stories(update: Update, context: ContextTypes.DEFAU
                 await message.reply_text("❌ این استوری برای اکانت متصل قابل‌دسترسی نیست.")
             else:
                 log.warning(f"⚠️ خطای download_story سروش: {name}", exc_info=True)
-                await message.reply_text("⚠️ هنگام دریافت استوری خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+                await message.reply_text(_err_line(_owner, e))
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
