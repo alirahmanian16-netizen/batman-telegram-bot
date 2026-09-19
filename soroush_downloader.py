@@ -184,6 +184,8 @@ async def srs_test_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text("⏳ در حال تست اتصال...")
     connected = await sc.is_connected()
     text = "🟢 اتصال سروش فعال است" if connected else "🔴 اتصال سروش برقرار نیست"
+    if not connected and getattr(sc, "LAST_ERROR", ""):
+        text += f"\n\nدلیل: {_safe_err_text(Exception(sc.LAST_ERROR), 200)}"
     await query.edit_message_text(text, reply_markup=_admin_menu_keyboard())
 
 

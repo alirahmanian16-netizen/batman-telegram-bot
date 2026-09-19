@@ -77,20 +77,71 @@ def is_library_available() -> bool:
 
 
 def session_file_exists() -> bool:
-    return os.path.exists(SOROUSH_SESSION_PATH + ".session")
+    import glob
+    return bool(glob.glob(SOROUSH_SESSION_PATH + "*"))
+
+
+# آخرین دلیل ناموفق بودن اتصال (برای نمایش به Owner تو دکمه‌ی «تست اتصال»)
+LAST_ERROR = ""
+
+
+async def _no_interactive_code():
+    """اگه Session معتبر نباشه و کتابخونه کد بخواد، به‌جای منتظر موندن (یا input())
+    فوراً خطا بده."""
+    raise SoroushNotConfigured("Session معتبر نیست؛ باید دوباره لاگین کنی")
+
+
+class _OpenedClient:
+    """جایگزین `async with SplusClient(...)`: با Session موجود کلاینت رو
+    صریحاً start می‌کنه (شماره از ENV) و آخرش تمیز stop می‌کنه. دلیلش اینه که
+    __aenter__ی که بدون شماره start رو صدا بزنه ممکنه روی Session ذخیره‌شده
+    خطا بده/گیر کنه."""
+
+    async def __aenter__(self):
+        self.client = SplusClient(SOROUSH_SESSION_PATH)
+        try:
+            await self.client.start(SOROUSH_PHONE, code_callback=_no_interactive_code)
+        except BaseException:
+            try:
+                await self.client.stop()
+            except Exception:
+                pass
+            raise
+        return self.client
+
+    async def __aexit__(self, exc_type, exc, tb):
+        try:
+            await self.client.stop()
+        except Exception:
+            log.debug("client.stop() سروش خطا داد (بی‌اهمیت)", exc_info=True)
+        return False
 
 
 async def get_me_safe():
     """اگه Session معتبره، اطلاعات اکانت رو برمی‌گردونه؛ وگرنه None (بدون
-    Exception به بیرون -- برای دکمه‌های «وضعیت اتصال» و «تست اتصال»)."""
-    if SplusClient is None or not session_file_exists():
+    Exception به بیرون). دلیل شکست تو LAST_ERROR و لاگ (با traceback) ثبت می‌شه."""
+    global LAST_ERROR
+    LAST_ERROR = ""
+    if SplusClient is None:
+        LAST_ERROR = "کتابخونه spluslib نصب نیست"
+        return None
+    if not SOROUSH_PHONE:
+        LAST_ERROR = "SOROUSH_PHONE تنظیم نشده"
+        return None
+    if not session_file_exists():
+        LAST_ERROR = f"فایل Session پیدا نشد ({SOROUSH_SESSION_DIR})"
+        log.warning(f"⚠️ {LAST_ERROR}")
         return None
     try:
-        async with SplusClient(SOROUSH_SESSION_PATH) as client:
+        async with _OpenedClient() as client:
             me = await client.get_me()
-            return me if isinstance(me, dict) and me.get("id") else None
+            if isinstance(me, dict) and me.get("id"):
+                return me
+            LAST_ERROR = "get_me جواب معتبر نداد"
+            return None
     except Exception as e:
-        log.warning(f"⚠️ تست اتصال سروش ناموفق بود: {type(e).__name__}: {e}", exc_info=True)
+        LAST_ERROR = f"{type(e).__name__}: {str(e)[:120]}"
+        log.warning("⚠️ تست اتصال سروش ناموفق بود", exc_info=True)
         return None
 
 
@@ -141,5 +192,5 @@ async def with_client(fn):
         raise SoroushNotConfigured(f"spluslib در دسترس نیست: {_lib_import_error}")
     if not session_file_exists():
         raise SoroushNotConfigured("اکانت سروش‌پلاس متصل نیست")
-    async with SplusClient(SOROUSH_SESSION_PATH) as client:
+    async with _OpenedClient() as client:
         return await fn(client)
