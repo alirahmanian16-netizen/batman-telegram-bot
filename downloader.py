@@ -201,8 +201,8 @@ DOWNLOADER_HELP_TEXT = (
 )
 
 
-def _dl_menu_markup():
-    return InlineKeyboardMarkup([
+def _dl_menu_markup(is_owner: bool = False):
+    rows = [
         [InlineKeyboardButton(PLATFORM_LABELS["instagram"], callback_data="dl:pick:instagram"),
          InlineKeyboardButton(PLATFORM_LABELS["youtube"], callback_data="dl:pick:youtube")],
         [InlineKeyboardButton(PLATFORM_LABELS["tiktok"], callback_data="dl:pick:tiktok"),
@@ -212,8 +212,12 @@ def _dl_menu_markup():
         # 🦇 دانلود استوری سروش‌پلاس (soroush_downloader.py) -- callback جدا با
         # پیشوند "srs:" تا با هندلر "dl:pick:" بالا تداخل نکنه.
         [InlineKeyboardButton("📱 دانلود استوری سروش", callback_data="srs:dl:menu")],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="panel:main")],
-    ])
+    ]
+    if is_owner:
+        # 🦇 اتصال اکانت سروش‌پلاس -- قبلاً تو پنل اصلی بود، الان اینجا (فقط Owner)
+        rows.append([InlineKeyboardButton("🦇 اتصال سروش‌پلاس", callback_data="srs:menu")])
+    rows.append([InlineKeyboardButton("🔙 بازگشت", callback_data="panel:main")])
+    return InlineKeyboardMarkup(rows)
 
 
 def _dl_after_pick_markup():
@@ -386,10 +390,18 @@ async def _download_direct_url(media_url: str, outdir: str, is_video: bool, prog
     return filepath
 
 
+def _is_srs_owner(update) -> bool:
+    try:
+        from soroush_downloader import is_owner_id
+        return bool(update.effective_user and is_owner_id(update.effective_user.id))
+    except Exception:
+        return False
+
+
 async def downloader_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.effective_message.reply_text(
         "📥 دانلودر گاتهام\n\nاول پلتفرم رو انتخاب کن، بعد لینک رو همینجا بفرست.",
-        reply_markup=_dl_menu_markup(),
+        reply_markup=_dl_menu_markup(is_owner=_is_srs_owner(update)),
     )
 
 

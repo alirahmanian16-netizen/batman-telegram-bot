@@ -44,6 +44,21 @@ FETCH_TIMEOUT_SEC = 30
 _VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".webm", ".avi")
 
 
+def _safe_err_text(e: Exception, limit: int = 160) -> str:
+    """متن کوتاه خطا برای نمایش به Owner -- شماره‌ی تلفن اگه بود پاک می‌شه."""
+    txt = str(e) or "-"
+    phone = getattr(sc, "SOROUSH_PHONE", "") or ""
+    if phone:
+        txt = txt.replace(phone, "***").replace(phone.lstrip("+"), "***")
+    return txt[:limit]
+
+
+def is_owner_id(user_id) -> bool:
+    """برای ماژول‌های دیگه (مثلاً downloader.py) تا دکمه‌ی اتصال رو فقط به Owner نشون بدن."""
+    owner_id = _DEPS.get("owner_id")
+    return bool(owner_id and user_id == owner_id)
+
+
 def _is_owner(update: Update) -> bool:
     owner_id = _DEPS.get("owner_id")
     return bool(update.effective_user and owner_id and update.effective_user.id == owner_id)
@@ -52,14 +67,14 @@ def _is_owner(update: Update) -> bool:
 def _admin_menu_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("🔎 تست اتصال سروش", callback_data="srs:test")],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="panel:main")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="panel:downloader")],
     ])
 
 
 def _send_code_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📱 ارسال کد ورود", callback_data="srs:sendcode")],
-        [InlineKeyboardButton("🔙 بازگشت", callback_data="panel:main")],
+        [InlineKeyboardButton("🔙 بازگشت", callback_data="panel:downloader")],
     ])
 
 
@@ -135,21 +150,26 @@ async def srs_sendcode_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 text="🔑 کد ورودی که برای شماره‌ی سروش‌پلاس ارسال شد رو همینجا بفرست:",
             )
             me = await sc.start_login(code_callback=_code_callback)
-            name = (me or {}).get("first_name") or ""
+            name = me.get("first_name") if isinstance(me, dict) else ""
+            name = name or ""
             await context.bot.send_message(
                 chat_id=user_id,
                 text=f"✅ اکانت سروش‌پلاس با موفقیت متصل شد.{(' (' + name + ')') if name else ''}",
+                reply_markup=_admin_menu_keyboard(),
             )
         except sc.SoroushNotConfigured as e:
             await context.bot.send_message(chat_id=user_id, text=f"⚠️ {e}")
         except asyncio.TimeoutError:
             await context.bot.send_message(chat_id=user_id, text="⚠️ زمان وارد کردن کد تموم شد. دوباره تلاش کن.")
         except Exception as e:
-            # 🔐 هرگز جزئیات حساس (شماره/کد) رو تو پیام یا لاگ چاپ نکن -- فقط نوع خطا
-            log.error(f"⚠️ خطای لاگین سروش‌پلاس: {type(e).__name__}")
+            # 🔐 traceback کامل تو لاگ Railway ثبت می‌شه (traceback شامل مقدار
+            # شماره/کد نیست). تو پیام کاربر هم نوع خطا + متن کوتاهِ خطا (مثلاً
+            # اسم attribute) نشون داده می‌شه، با پاک‌سازی شماره.
+            log.error("⚠️ خطای لاگین سروش‌پلاس (traceback کامل پایین)", exc_info=True)
+            detail = _safe_err_text(e)
             await context.bot.send_message(
                 chat_id=user_id,
-                text=f"⚠️ اتصال ناموفق بود ({type(e).__name__}). دوباره تلاش کن.",
+                text=f"⚠️ اتصال ناموفق بود ({type(e).__name__}: {detail}). دوباره تلاش کن.",
             )
 
     context.application.create_task(_run_login())
@@ -216,7 +236,7 @@ async def _download_and_send_stories(update: Update, context: ContextTypes.DEFAU
         elif errors and isinstance(e, getattr(errors, "UsernameNotFoundError", ())):
             await message.reply_text("❌ کاربر سروش‌پلاس پیدا نشد.")
         else:
-            log.warning(f"⚠️ خطای has_story سروش: {name}")
+            log.warning(f"⚠️ خطای has_story سروش: {name}", exc_info=True)
             await message.reply_text("⚠️ هنگام دریافت استوری خطایی رخ داد. لطفاً دوباره تلاش کنید.")
         return
 
@@ -259,7 +279,7 @@ async def _download_and_send_stories(update: Update, context: ContextTypes.DEFAU
             )):
                 await message.reply_text("❌ این استوری برای اکانت متصل قابل‌دسترسی نیست.")
             else:
-                log.warning(f"⚠️ خطای download_story سروش: {name}")
+                log.warning(f"⚠️ خطای download_story سروش: {name}", exc_info=True)
                 await message.reply_text("⚠️ هنگام دریافت استوری خطایی رخ داد. لطفاً دوباره تلاش کنید.")
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)

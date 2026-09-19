@@ -88,9 +88,9 @@ async def get_me_safe():
     try:
         async with SplusClient(SOROUSH_SESSION_PATH) as client:
             me = await client.get_me()
-            return me if me and me.get("id") else None
+            return me if isinstance(me, dict) and me.get("id") else None
     except Exception as e:
-        log.warning(f"⚠️ تست اتصال سروش ناموفق بود: {type(e).__name__}")
+        log.warning(f"⚠️ تست اتصال سروش ناموفق بود: {type(e).__name__}: {e}", exc_info=True)
         return None
 
 
@@ -115,13 +115,22 @@ async def start_login(code_callback, password=None):
     if password is not None:
         kwargs["password"] = password
     try:
-        me = await client.start(SOROUSH_PHONE, **kwargs)
-        return me
+        # ⚠️ مقدار برگشتیِ start() یک dict نیست (طبق مستندات SplusLib فقط
+        # get_me() دیکشنری برمی‌گردونه)؛ قبلاً همین مقدار با `.get(...)` خونده
+        # می‌شد و بعد از لاگینِ موفق AttributeError می‌داد. الان مقدار start()
+        # نادیده گرفته می‌شه و اطلاعات اکانت با get_me() (dict) گرفته می‌شه.
+        await client.start(SOROUSH_PHONE, **kwargs)
+        try:
+            me = await client.get_me()
+        except Exception:
+            log.warning("⚠️ get_me بعد از لاگین سروش ناموفق بود (لاگین انجام شده)", exc_info=True)
+            me = None
+        return me if isinstance(me, dict) else {}
     finally:
         try:
             await client.stop()
         except Exception:
-            pass
+            log.debug("client.stop() سروش خطا داد (بی‌اهمیت)", exc_info=True)
 
 
 async def with_client(fn):

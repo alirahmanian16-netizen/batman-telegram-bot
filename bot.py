@@ -1547,9 +1547,6 @@ def build_panel_main_keyboard(is_owner: bool = False):
     if is_owner:
         last_row.append(InlineKeyboardButton("📜 همه کلمات ربات", callback_data="panel:words"))
     rows.append(last_row)
-    if is_owner:
-        # 🦇 اتصال Soroush Plus (soroush_downloader.py) -- فقط Owner می‌بینتش
-        rows.append([InlineKeyboardButton("🦇 اتصال سروش‌پلاس", callback_data="srs:menu")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -3706,7 +3703,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if data == "panel:downloader":
-        await query.edit_message_text(DOWNLOADER_HELP_TEXT, reply_markup=dl_menu_markup())
+        await query.edit_message_text(DOWNLOADER_HELP_TEXT, reply_markup=dl_menu_markup(is_owner=(query.from_user.id == OWNER_ID)))
         return
 
     if data == "panel:mod":
